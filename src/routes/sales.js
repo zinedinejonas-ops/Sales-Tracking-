@@ -35,7 +35,7 @@ router.post('/shops/:shopId', requireAuth, async (req, res) => {
 
         // Lock the stock row to prevent race conditions during concurrent sales.
         const { rows: stockRows } = await client.query(
-          'SELECT on_hand FROM stock WHERE shop_id=? AND product_id=? FOR UPDATE',
+          'SELECT on_hand FROM stock WHERE shop_id=$1 AND product_id=$2 FOR UPDATE',
           [shopId, pid]
         )
         if (!stockRows.length) {
@@ -57,7 +57,7 @@ router.post('/shops/:shopId', requireAuth, async (req, res) => {
         const pid = Number(item.product_id)
         const qty = Number(item.quantity)
         const { rows: pr } = await client.query(
-          'SELECT id, sell_price, tax_rate FROM products WHERE id=? AND active=1',
+          'SELECT id, sell_price, tax_rate FROM products WHERE id=$1 AND active=true',
           [pid]
         )
         if (!pr.length) {
@@ -77,27 +77,25 @@ router.post('/shops/:shopId', requireAuth, async (req, res) => {
       const grandTotal = subtotal + taxTotal - discountTotal
 
       // Insert sale header with seller, shop, and computed totals.
-      await client.query(
+      const { rows: idRows } = await client.query(
         `INSERT INTO sales (shop_id, seller_id, subtotal, tax_total, discount_total, grand_total, payment_status, created_at)
-         VALUES (?,?,?,?,?,?, 'paid', NOW())`,
+         VALUES ($1,$2,$3,$4,$5,$6, 'paid', NOW()) RETURNING id, created_at`,
         [shopId, req.user.userId, subtotal, taxTotal, discountTotal, grandTotal]
       )
-      const { rows: idRows } = await client.query('SELECT LAST_INSERT_ID() AS id', [])
       const saleId = idRows[0].id
-      const { rows: saleDateRows } = await client.query('SELECT created_at FROM sales WHERE id=?', [saleId])
-      const saleDate = saleDateRows[0].created_at
+      const saleDate = idRows[0].created_at
 
       // Insert each line item and decrement stock atomically (stock rows already locked).
       for (const line of lineDetails) {
         await client.query(
           `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, discount_amount, tax_amount, line_total)
-           VALUES (?,?,?,?,?,?,?)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [saleId, line.product_id, line.quantity, line.unit_price, 0, line.tax_amount, line.line_total]
         )
         await client.query(
           `UPDATE stock
-           SET on_hand = on_hand - ?, sold_count = COALESCE(sold_count,0) + ?, updated_at = NOW()
-           WHERE shop_id=? AND product_id=?`,
+           SET on_hand = on_hand - $1, sold_count = COALESCE(sold_count,0) + $2, updated_at = NOW()
+           WHERE shop_id=$3 AND product_id=$4`,
           [line.quantity, line.quantity, shopId, line.product_id]
         )
       }
@@ -133,6 +131,7 @@ router.post('/shops/:shopId', requireAuth, async (req, res) => {
     if (err && err.code === 'INVALID_ITEM') {
       return res.status(422).json({ error: 'invalid_item' })
     }
+    console.error(err)
     return res.status(500).json({ error: 'server_error' })
   }
 })
@@ -157,7 +156,7 @@ router.post('/sync', requireAuth, async (req, res) => {
         if (req.user.role === 'seller' && Number(req.user.shopId || 0) !== shopId) {
           throw Object.assign(new Error('forbidden_shop'), { code: 'FORBIDDEN_SHOP' })
         }
-        const existing = await client.query('SELECT id FROM sales WHERE client_id=?', [clientId])
+        const existing = await client.query('SELECT id FROM sales WHERE client_id=$1', [clientId])
         if (existing.rows.length) {
           return { status: 'duplicate', sale_id: existing.rows[0].id }
         }
@@ -172,7 +171,7 @@ router.post('/sync', requireAuth, async (req, res) => {
           if (!pid || !qty || qty <= 0) {
             throw Object.assign(new Error('invalid_item'), { code: 'INVALID_ITEM' })
           }
-          const { rows: stockRows } = await client.query('SELECT on_hand FROM stock WHERE shop_id=? AND product_id=? FOR UPDATE', [shopId, pid])
+          const { rows: stockRows } = await client.query('SELECT on_hand FROM stock WHERE shop_id=$1 AND product_id=$2 FOR UPDATE', [shopId, pid])
           if (!stockRows.length) {
             throw Object.assign(new Error('stock_not_found'), { code: 'STOCK_NOT_FOUND', product_id: pid })
           }
@@ -180,7 +179,7 @@ router.post('/sync', requireAuth, async (req, res) => {
           if (onHand < qty) {
             throw Object.assign(new Error('insufficient_stock'), { code: 'INSUFFICIENT_STOCK', product_id: pid, available: onHand, requested: qty })
           }
-          const { rows: pr } = await client.query('SELECT sell_price, cost_price, tax_rate FROM products WHERE id=? AND active=1', [pid])
+          const { rows: pr } = await client.query('SELECT sell_price, cost_price, tax_rate FROM products WHERE id=$1 AND active=true', [pid])
           if (!pr.length) {
             throw Object.assign(new Error('product_not_found'), { code: 'PRODUCT_NOT_FOUND', product_id: pid })
           }
@@ -199,22 +198,21 @@ router.post('/sync', requireAuth, async (req, res) => {
           lineDetails.push({ product_id: pid, quantity: qty, unit_price: price, discount_amount: discountAmount, tax_amount: lineTax, line_total: lineTotal, profit_amount: profitAmount })
         }
         const grandTotal = subtotal + taxTotal - discountTotal
-        await client.query(
+        const { rows: idRows } = await client.query(
           `INSERT INTO sales (shop_id, seller_id, subtotal, tax_total, discount_total, grand_total, payment_status, created_at, client_id, client_created_at)
-           VALUES (?,?,?,?,?,?, 'paid', NOW(), ?, ?)`,
+           VALUES ($1,$2,$3,$4,$5,$6, 'paid', NOW(), $7, $8) RETURNING id`,
           [shopId, req.user.userId, subtotal, taxTotal, discountTotal, grandTotal, clientId, clientCreatedAt]
         )
-        const { rows: idRows } = await client.query('SELECT LAST_INSERT_ID() AS id', [])
         const saleId = idRows[0].id
         for (const line of lineDetails) {
           await client.query(
             `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, discount_amount, tax_amount, line_total, profit_amount)
-             VALUES (?,?,?,?,?,?,?,?)`,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
             [saleId, line.product_id, line.quantity, line.unit_price, line.discount_amount, line.tax_amount, line.line_total, line.profit_amount]
           )
           await client.query(
-            `UPDATE stock SET on_hand = on_hand - ?, sold_count = COALESCE(sold_count,0) + ?, updated_at = NOW()
-             WHERE shop_id=? AND product_id=?`,
+            `UPDATE stock SET on_hand = on_hand - $1, sold_count = COALESCE(sold_count,0) + $2, updated_at = NOW()
+             WHERE shop_id=$3 AND product_id=$4`,
             [line.quantity, line.quantity, shopId, line.product_id]
           )
         }
@@ -223,6 +221,7 @@ router.post('/sync', requireAuth, async (req, res) => {
       results.push({ client_id: sale.client_id || sale.id, ...result })
     } catch (err) {
       const code = err && err.code ? err.code : 'ERROR'
+      console.error(err)
       results.push({ client_id: sale.client_id || sale.id, status: 'error', code })
     }
   }

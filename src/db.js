@@ -1,40 +1,51 @@
-import mysql from "mysql2/promise";
+import pg from 'pg';
+import dotenv from 'dotenv';
 
-const pool = mysql.createPool({
-  host: "localhost",
-  port: 3306,
-  user: "root",
-  password: "2408@Dvd",
-  database: "sales_db",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+dotenv.config();
 
-export async function query(sql, params = []) {
-  const [rows] = await pool.execute(sql, params);
-  return { rows };
+const { Pool } = pg;
+
+const poolConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: {
+        rejectUnauthorized: false
+      }
+    }
+  : {
+      host: process.env.DB_HOST || "localhost",
+      port: process.env.DB_PORT || 5432,
+      user: process.env.DB_USER || "postgres",
+      password: process.env.DB_PASSWORD || "2408@Dvd",
+      database: process.env.DB_NAME || "sales_db",
+    };
+
+const pool = new Pool(poolConfig);
+
+export async function query(text, params = []) {
+  const result = await pool.query(text, params);
+  return { rows: result.rows };
 }
 
 export async function transaction(run) {
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    await conn.beginTransaction();
-
-    const client = {
-      query: async (sql, params = []) => {
-        const [rows] = await conn.execute(sql, params);
-        return { rows };
+    await client.query('BEGIN');
+    
+    const clientWrapper = {
+      query: async (text, params = []) => {
+        const result = await client.query(text, params);
+        return { rows: result.rows };
       }
     };
 
-    const result = await run(client);
-    await conn.commit();
+    const result = await run(clientWrapper);
+    await client.query('COMMIT');
     return result;
   } catch (err) {
-    await conn.rollback();
+    await client.query('ROLLBACK');
     throw err;
   } finally {
-    conn.release();
+    client.release();
   }
 }

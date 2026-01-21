@@ -18,14 +18,15 @@ router.get('/daily', requireAuth, async (req, res) => {
        JOIN shops sh ON sh.id = s.shop_id
        JOIN sale_items si ON si.sale_id = s.id
        JOIN products p ON p.id = si.product_id
-       WHERE DATE(s.created_at) = CURDATE()
+       WHERE s.created_at::DATE = CURRENT_DATE
        GROUP BY sh.id, sh.name
        ORDER BY profit DESC`,
       []
     )
     const data = rows.map(r => ({ shop_id: r.shop_id, shop_name: r.shop_name, profit: Number(r.profit || 0), profit_formatted: tzs(r.profit || 0) }))
     res.json(data)
-  } catch {
+  } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'server_error' })
   }
 })
@@ -39,14 +40,15 @@ router.get('/monthly', requireAuth, async (req, res) => {
        JOIN shops sh ON sh.id = s.shop_id
        JOIN sale_items si ON si.sale_id = s.id
        JOIN products p ON p.id = si.product_id
-       WHERE s.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+       WHERE s.created_at >= CURRENT_DATE - INTERVAL '30 days'
        GROUP BY sh.id, sh.name
        ORDER BY profit DESC`,
       []
     )
     const data = rows.map(r => ({ shop_id: r.shop_id, shop_name: r.shop_name, profit: Number(r.profit || 0), profit_formatted: tzs(r.profit || 0) }))
     res.json(data)
-  } catch {
+  } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'server_error' })
   }
 })
@@ -60,7 +62,7 @@ router.get('/weekly', requireAuth, async (req, res) => {
        JOIN shops sh ON sh.id = s.shop_id
        JOIN sale_items si ON si.sale_id = s.id
        JOIN products p ON p.id = si.product_id
-       WHERE s.created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+       WHERE s.created_at >= CURRENT_DATE - INTERVAL '7 days'
        GROUP BY sh.id, sh.name
        ORDER BY profit DESC`,
       []
@@ -73,7 +75,7 @@ router.get('/weekly', requireAuth, async (req, res) => {
        JOIN shops sh ON sh.id = s.shop_id
        JOIN sale_items si ON si.sale_id = s.id
        JOIN products pr ON pr.id = si.product_id
-       WHERE s.created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+       WHERE s.created_at >= CURRENT_DATE - INTERVAL '7 days'
        GROUP BY sh.id, sh.name, si.product_id, pr.name`,
       []
     )
@@ -91,7 +93,8 @@ router.get('/weekly', requireAuth, async (req, res) => {
       top_product: topMap[String(t.shop_id)] || null
     }))
     res.json(data)
-  } catch {
+  } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'server_error' })
   }
 })
@@ -105,7 +108,7 @@ router.get('/overview', requireAuth, async (req, res) => {
        JOIN shops sh ON sh.id = s.shop_id
        JOIN sale_items si ON si.sale_id = s.id
        JOIN products p ON p.id = si.product_id
-       WHERE DATE(s.created_at) = CURDATE()
+       WHERE s.created_at::DATE = CURRENT_DATE
        GROUP BY sh.id, sh.name`,
       []
     )
@@ -114,7 +117,7 @@ router.get('/overview', requireAuth, async (req, res) => {
        FROM sales s
        JOIN sale_items si ON si.sale_id = s.id
        JOIN products p ON p.id = si.product_id
-       WHERE s.created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`,
+       WHERE s.created_at >= CURRENT_DATE - INTERVAL '7 days'`,
       []
     )
     const monthly = await query(
@@ -122,7 +125,7 @@ router.get('/overview', requireAuth, async (req, res) => {
        FROM sales s
        JOIN sale_items si ON si.sale_id = s.id
        JOIN products p ON p.id = si.product_id
-       WHERE s.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`,
+       WHERE s.created_at >= CURRENT_DATE - INTERVAL '30 days'`,
       []
     )
     res.json({
@@ -135,7 +138,8 @@ router.get('/overview', requireAuth, async (req, res) => {
       monthly_total: Number((monthly.rows[0] && monthly.rows[0].profit) || 0),
       monthly_total_formatted: tzs((monthly.rows[0] && monthly.rows[0].profit) || 0)
     })
-  } catch {
+  } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'server_error' })
   }
 })

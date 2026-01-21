@@ -32,7 +32,7 @@ router.post('/seller-login', async (req, res) => {
     // Trim input name and compare with trimmed DB name to handle accidental spaces
     const cleanName = name.trim()
     const { rows } = await query(
-      'SELECT id, name, password, role, active, shop_id FROM users WHERE role=\'seller\' AND TRIM(name)=?',
+      'SELECT id, name, password, role, active, shop_id FROM users WHERE role=\'seller\' AND TRIM(name)=$1',
       [cleanName]
     )
     if (!rows.length) {

@@ -8,14 +8,14 @@ router.get('/shops/:shopId', requireAuth, async (req, res) => {
   const shopId = Number(req.params.shopId)
   if (!shopId) return res.status(400).json({ error: 'invalid_id' })
   try {
-    const { rows: shop } = await query(`SELECT id, name FROM shops WHERE id=?`, [shopId])
+    const { rows: shop } = await query(`SELECT id, name FROM shops WHERE id=$1`, [shopId])
     if (!shop.length) return res.status(404).json({ error: 'shop_not_found' })
     
     const { rows: stock } = await query(
       `SELECT COUNT(*) as count, SUM(on_hand) as total_items, SUM(on_hand * p.sell_price) as total_value
        FROM stock s
        JOIN products p ON p.id = s.product_id
-       WHERE s.shop_id=?`,
+       WHERE s.shop_id=$1`,
       [shopId]
     )
     res.json({ ...shop[0], total_items: Number(stock[0].total_items || 0), total_value: Number(stock[0].total_value || 0) })
@@ -33,7 +33,7 @@ router.get('/shops/:shopId/products/:productId', requireAuth, async (req, res) =
     return res.status(403).json({ error: 'forbidden_shop' })
   }
   try {
-    const { rows } = await query(`SELECT on_hand, COALESCE(sold_count, 0) AS sold_count FROM stock WHERE shop_id=? AND product_id=?`, [shopId, productId])
+    const { rows } = await query(`SELECT on_hand, COALESCE(sold_count, 0) AS sold_count FROM stock WHERE shop_id=$1 AND product_id=$2`, [shopId, productId])
     res.json({ on_hand: rows.length ? Number(rows[0].on_hand) : 0, sold_count: rows.length ? Number(rows[0].sold_count || 0) : 0 })
   } catch (err) {
     console.error('Stock API Error:', err)
@@ -54,7 +54,7 @@ router.get('/shops/:shopId/products', requireAuth, async (req, res) => {
              COALESCE(s.on_hand, 0) as on_hand,
              COALESCE(s.sold_count, 0) as sold_count
     FROM products p
-    LEFT JOIN stock s ON s.product_id = p.id AND s.shop_id = ?
+    LEFT JOIN stock s ON s.product_id = p.id AND s.shop_id = $1
     `
     if (req.user.role === 'seller') {
       sql += ` WHERE s.product_id IS NOT NULL `
@@ -82,23 +82,24 @@ router.post('/shops/:shopId/products/:productId/add', requireAuth, async (req, r
   try {
     const result = await transaction(async (client) => {
       // 1. Check and Deduct from Main Store (Admin)
-      const { rows: check } = await client.query('SELECT total_stock FROM products WHERE id=?', [productId])
+      const { rows: check } = await client.query('SELECT total_stock FROM products WHERE id=$1', [productId])
       if (!check.length) throw new Error('product_not_found')
       if ((check[0].total_stock || 0) < quantity) throw new Error('insufficient_store_stock')
 
-      await client.query(`UPDATE products SET total_stock = total_stock - ? WHERE id=?`, [quantity, productId])
+      await client.query(`UPDATE products SET total_stock = total_stock - $1 WHERE id=$2`, [quantity, productId])
       
       // 2. Add to Shop Stock
       const upsert = `
         INSERT INTO stock (shop_id, product_id, on_hand, reorder_level, sold_count, updated_at)
-        VALUES (?,?,?,?,0, NOW())
-        ON DUPLICATE KEY UPDATE on_hand = COALESCE(on_hand, 0) + VALUES(on_hand), updated_at = NOW()
+        VALUES ($1,$2,$3,$4,0, NOW())
+        ON CONFLICT (shop_id, product_id) DO UPDATE 
+        SET on_hand = COALESCE(stock.on_hand, 0) + EXCLUDED.on_hand, updated_at = NOW()
       `
       await client.query(upsert, [shopId, productId, quantity, 0])
       
       // 3. Return updated stock
       const { rows } = await client.query(
-        `SELECT shop_id, product_id, on_hand, COALESCE(sold_count,0) AS sold_count FROM stock WHERE shop_id=? AND product_id=?`,
+        `SELECT shop_id, product_id, on_hand, COALESCE(sold_count,0) AS sold_count FROM stock WHERE shop_id=$1 AND product_id=$2`,
         [shopId, productId]
       )
       return rows[0]
@@ -120,7 +121,7 @@ router.get('/products/:productId/summary', requireAuth, async (req, res) => {
     const { rows: perShop } = await query(
       `SELECT sh.id AS shop_id, sh.name AS shop_name, COALESCE(st.on_hand, 0) AS on_hand
        FROM shops sh
-       LEFT JOIN stock st ON st.shop_id = sh.id AND st.product_id = ?
+       LEFT JOIN stock st ON st.shop_id = sh.id AND st.product_id = $1
        ORDER BY sh.name ASC`,
       [productId]
     )

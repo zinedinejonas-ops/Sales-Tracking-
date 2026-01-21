@@ -15,7 +15,7 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
     `
     const params = []
     if (search) {
-      sql += ` WHERE s.name LIKE ?`
+      sql += ` WHERE s.name LIKE $1`
       params.push(`%${search}%`)
     }
     sql += ` ORDER BY s.name ASC LIMIT 200`
@@ -50,13 +50,12 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
   if (!name) return res.status(400).json({ error: 'missing_fields' })
   try {
     const result = await transaction(async client => {
-      await client.query(`INSERT INTO shops (name, active, created_at) VALUES (?, 1, NOW())`, [name])
-      const { rows: idRows } = await client.query(`SELECT LAST_INSERT_ID() AS id`, [])
+      const { rows: idRows } = await client.query(`INSERT INTO shops (name, active, created_at) VALUES ($1, true, NOW()) RETURNING id`, [name])
       const shopId = idRows[0].id
       if (seller_id) {
-        await client.query(`UPDATE users SET shop_id=? WHERE id=? AND role='seller'`, [shopId, Number(seller_id)])
+        await client.query(`UPDATE users SET shop_id=$1 WHERE id=$2 AND role='seller'`, [shopId, Number(seller_id)])
       }
-      const { rows } = await client.query(`SELECT id, name, active FROM shops WHERE id=?`, [shopId])
+      const { rows } = await client.query(`SELECT id, name, active FROM shops WHERE id=$1`, [shopId])
       return rows[0]
     })
     res.status(201).json(result)
@@ -72,14 +71,14 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     await transaction(async client => {
       await client.query(
-        `UPDATE shops SET name=COALESCE(?, name), active=COALESCE(?, active) WHERE id=?`,
-        [name || null, typeof active === 'boolean' ? (active ? 1 : 0) : null, id]
+        `UPDATE shops SET name=COALESCE($1, name), active=COALESCE($2, active) WHERE id=$3`,
+        [name || null, typeof active === 'boolean' ? active : null, id]
       )
       if (seller_id) {
-        await client.query(`UPDATE users SET shop_id=? WHERE id=? AND role='seller'`, [id, Number(seller_id)])
+        await client.query(`UPDATE users SET shop_id=$1 WHERE id=$2 AND role='seller'`, [id, Number(seller_id)])
       }
     })
-    const { rows } = await query(`SELECT id, name, active FROM shops WHERE id=?`, [id])
+    const { rows } = await query(`SELECT id, name, active FROM shops WHERE id=$1`, [id])
     if (!rows.length) return res.status(404).json({ error: 'not_found' })
     res.json(rows[0])
   } catch {
@@ -91,10 +90,10 @@ router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   const id = Number(req.params.id)
   if (!id) return res.status(400).json({ error: 'invalid_id' })
   try {
-    const { rows: salesRows } = await query(`SELECT COUNT(*) AS cnt FROM sales WHERE shop_id=?`, [id])
+    const { rows: salesRows } = await query(`SELECT COUNT(*) AS cnt FROM sales WHERE shop_id=$1`, [id])
     const hasSales = Number(salesRows[0].cnt) > 0
     if (hasSales) return res.status(409).json({ error: 'has_sales' })
-    await query(`DELETE FROM shops WHERE id=?`, [id])
+    await query(`DELETE FROM shops WHERE id=$1`, [id])
     res.json({ ok: true })
   } catch {
     res.status(500).json({ error: 'server_error' })

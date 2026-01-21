@@ -11,7 +11,7 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
     let sql = `SELECT id, name, email, shop_id, active FROM users WHERE role='seller'`
     const params = []
     if (search) {
-      sql += ` AND name LIKE ?`
+      sql += ` AND name LIKE $1`
       params.push(`%${search}%`)
     }
     sql += ` ORDER BY name ASC LIMIT 200`
@@ -30,10 +30,10 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
     const hash = await bcrypt.hash(password, 10)
     await query(
       `INSERT INTO users (name, email, password, role, active, shop_id)
-       VALUES (?,?,?,?,1,?)`,
+       VALUES ($1,$2,$3,$4,true,$5)`,
       [cleanName, contact, hash, 'seller', shop_id ? Number(shop_id) : null]
     )
-    const { rows } = await query(`SELECT id, name, email, shop_id FROM users WHERE role='seller' AND email=?`, [contact])
+    const { rows } = await query(`SELECT id, name, email, shop_id FROM users WHERE role='seller' AND email=$1`, [contact])
     res.status(201).json(rows[0])
   } catch {
     res.status(500).json({ error: 'server_error' })
@@ -47,18 +47,18 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     if (password) {
       const hash = await bcrypt.hash(password, 10)
-      await query(`UPDATE users SET password=? WHERE id=? AND role='seller'`, [hash, id])
+      await query(`UPDATE users SET password=$1 WHERE id=$2 AND role='seller'`, [hash, id])
     }
     await query(
       `UPDATE users
-       SET name=COALESCE(?, name),
-           email=COALESCE(?, email),
-           shop_id=COALESCE(?, shop_id),
-           active=COALESCE(?, active)
-       WHERE id=? AND role='seller'`,
-      [name ? name.trim() : null, contact || null, typeof shop_id !== 'undefined' ? Number(shop_id) : null, typeof active === 'boolean' ? (active ? 1 : 0) : null, id]
+       SET name=COALESCE($1, name),
+           email=COALESCE($2, email),
+           shop_id=COALESCE($3, shop_id),
+           active=COALESCE($4, active)
+       WHERE id=$5 AND role='seller'`,
+      [name ? name.trim() : null, contact || null, typeof shop_id !== 'undefined' ? Number(shop_id) : null, typeof active === 'boolean' ? active : null, id]
     )
-    const { rows } = await query(`SELECT id, name, email, shop_id, active FROM users WHERE id=? AND role='seller'`, [id])
+    const { rows } = await query(`SELECT id, name, email, shop_id, active FROM users WHERE id=$1 AND role='seller'`, [id])
     if (!rows.length) return res.status(404).json({ error: 'not_found' })
     res.json(rows[0])
   } catch {
@@ -70,11 +70,11 @@ router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   const id = Number(req.params.id)
   if (!id) return res.status(400).json({ error: 'invalid_id' })
   try {
-    const { rows: hasSales } = await query(`SELECT 1 FROM sales WHERE seller_id=? LIMIT 1`, [id])
+    const { rows: hasSales } = await query(`SELECT 1 FROM sales WHERE seller_id=$1 LIMIT 1`, [id])
     if (hasSales.length) {
       return res.status(409).json({ error: 'cannot_delete', reason: 'seller_has_sales' })
     }
-    await query(`DELETE FROM users WHERE id=? AND role='seller'`, [id])
+    await query(`DELETE FROM users WHERE id=$1 AND role='seller'`, [id])
     res.json({ ok: true })
   } catch {
     res.status(500).json({ error: 'server_error' })
@@ -84,9 +84,9 @@ router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
 router.get('/ranking', requireAuth, requireRole('admin'), async (req, res) => {
   const period = String(req.query.period || 'daily')
   try {
-    let whereDate = 'DATE(s.created_at) = DATE(NOW())'
-    if (period === 'weekly') whereDate = 'YEARWEEK(s.created_at, 1) = YEARWEEK(NOW(), 1)'
-    if (period === 'monthly') whereDate = 'YEAR(s.created_at) = YEAR(NOW()) AND MONTH(s.created_at) = MONTH(NOW())'
+    let whereDate = 's.created_at::date = CURRENT_DATE'
+    if (period === 'weekly') whereDate = "DATE_TRUNC('week', s.created_at) = DATE_TRUNC('week', CURRENT_DATE)"
+    if (period === 'monthly') whereDate = "DATE_TRUNC('month', s.created_at) = DATE_TRUNC('month', CURRENT_DATE)"
     const sql = `
       SELECT u.id AS seller_id,
              u.name AS seller_name,

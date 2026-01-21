@@ -31,13 +31,13 @@ router.get('/sales', requireAuth, async (req, res) => {
     const params = []
     let where = '1=1'
     if (shopId) {
-      where = 'shop_id = ?'
       params.push(shopId)
+      where = `shop_id = $${params.length}`
     }
     let sql
     if (period === 'weekly') {
       sql = `
-        SELECT YEARWEEK(created_at, 1) AS period,
+        SELECT DATE_TRUNC('week', created_at) AS period,
                COUNT(*) AS sales_count,
                SUM(subtotal) AS subtotal,
                SUM(tax_total) AS tax_total,
@@ -45,13 +45,13 @@ router.get('/sales', requireAuth, async (req, res) => {
                SUM(grand_total) AS grand_total
         FROM sales
         WHERE ${where}
-        GROUP BY YEARWEEK(created_at, 1)
-        ORDER BY YEARWEEK(created_at, 1) DESC
+        GROUP BY DATE_TRUNC('week', created_at)
+        ORDER BY DATE_TRUNC('week', created_at) DESC
         LIMIT 90
       `
     } else if (period === 'monthly') {
       sql = `
-        SELECT DATE_FORMAT(created_at, '%Y-%m-01') AS period,
+        SELECT DATE_TRUNC('month', created_at) AS period,
                COUNT(*) AS sales_count,
                SUM(subtotal) AS subtotal,
                SUM(tax_total) AS tax_total,
@@ -59,13 +59,13 @@ router.get('/sales', requireAuth, async (req, res) => {
                SUM(grand_total) AS grand_total
         FROM sales
         WHERE ${where}
-        GROUP BY DATE_FORMAT(created_at, '%Y-%m-01')
-        ORDER BY DATE_FORMAT(created_at, '%Y-%m-01') DESC
+        GROUP BY DATE_TRUNC('month', created_at)
+        ORDER BY DATE_TRUNC('month', created_at) DESC
         LIMIT 90
       `
     } else {
       sql = `
-        SELECT DATE(created_at) AS period,
+        SELECT created_at::DATE AS period,
                COUNT(*) AS sales_count,
                SUM(subtotal) AS subtotal,
                SUM(tax_total) AS tax_total,
@@ -73,14 +73,15 @@ router.get('/sales', requireAuth, async (req, res) => {
                SUM(grand_total) AS grand_total
         FROM sales
         WHERE ${where}
-        GROUP BY DATE(created_at)
-        ORDER BY DATE(created_at) DESC
+        GROUP BY created_at::DATE
+        ORDER BY created_at::DATE DESC
         LIMIT 90
       `
     }
     const { rows } = await query(sql, params)
     res.json(rows)
   } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'server_error' })
   }
 })
@@ -90,15 +91,15 @@ router.get('/top-products', requireAuth, async (req, res) => {
   const shopId = req.query.shopId ? Number(req.query.shopId) : null
   const limit = req.query.limit ? Number(req.query.limit) : 10
   try {
-    let whereDate = 'YEARWEEK(s.created_at, 1) = YEARWEEK(NOW(), 1)'
+    let whereDate = "DATE_TRUNC('week', s.created_at) = DATE_TRUNC('week', CURRENT_DATE)"
     if (period === 'monthly') {
-      whereDate = 'YEAR(s.created_at) = YEAR(NOW()) AND MONTH(s.created_at) = MONTH(NOW())'
+      whereDate = "DATE_TRUNC('month', s.created_at) = DATE_TRUNC('month', CURRENT_DATE)"
     }
     const params = []
     let whereShop = ''
     if (shopId) {
-      whereShop = ' AND s.shop_id = ?'
       params.push(shopId)
+      whereShop = ` AND s.shop_id = $${params.length}`
     }
     const sql = `
       SELECT si.product_id,
@@ -115,6 +116,7 @@ router.get('/top-products', requireAuth, async (req, res) => {
     const { rows } = await query(sql, params)
     res.json(rows)
   } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'server_error' })
   }
 })
@@ -122,12 +124,12 @@ router.get('/top-products', requireAuth, async (req, res) => {
 router.get('/sales-per-shop', requireAuth, async (req, res) => {
   const period = String(req.query.period || 'monthly')
   try {
-    let whereDate = 'YEAR(s.created_at) = YEAR(NOW()) AND MONTH(s.created_at) = MONTH(NOW())'
+    let whereDate = "DATE_TRUNC('month', s.created_at) = DATE_TRUNC('month', CURRENT_DATE)"
     if (period === 'weekly') {
-      whereDate = 'YEARWEEK(s.created_at, 1) = YEARWEEK(NOW(), 1)'
+      whereDate = "DATE_TRUNC('week', s.created_at) = DATE_TRUNC('week', CURRENT_DATE)"
     }
     if (period === 'daily') {
-      whereDate = 'DATE(s.created_at) = DATE(NOW())'
+      whereDate = "s.created_at::DATE = CURRENT_DATE"
     }
     const sql = `
       SELECT sh.id AS shop_id,
@@ -143,6 +145,7 @@ router.get('/sales-per-shop', requireAuth, async (req, res) => {
     const { rows } = await query(sql, [])
     res.json(rows)
   } catch (err) {
+    console.error(err)
     res.status(500).json({ error: 'server_error' })
   }
 })
