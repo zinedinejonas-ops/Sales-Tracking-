@@ -10,6 +10,7 @@ import adminRouter from './routes/admin.js'
 import sellersRouter from './routes/sellers.js'
 import shopsRouter from './routes/shops.js'
 import profitRouter from './routes/profit.js'
+import { query } from './db.js'
 
 dotenv.config()
 
@@ -41,6 +42,12 @@ app.get('/health', (req, res) => {
 })
 
 const port = process.env.PORT || 3000
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`Server listening on port ${port}`)
+  try {
+    await query('SELECT 1')
+    console.log('Database connection successful')
+  } catch (err) {
+    console.error('Database connection failed:', err)
+  }
 })
