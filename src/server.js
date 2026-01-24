@@ -41,7 +41,7 @@ app.get('/health', (req, res) => {
   res.json({ ok: true })
 })
 
-const port = process.env.PORT || 1000
+const port = process.env.PORT || 10000
 app.listen(port, async () => {
   console.log(`Server listening on port ${port}`)
   try {
