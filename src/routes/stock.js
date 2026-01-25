@@ -90,12 +90,12 @@ router.post('/shops/:shopId/products/:productId/add', requireAuth, async (req, r
       
       // 2. Add to Shop Stock
       const upsert = `
-        INSERT INTO stock (shop_id, product_id, on_hand, reorder_level, sold_count, updated_at)
-        VALUES ($1,$2,$3,$4,0, NOW())
+        INSERT INTO stock (shop_id, product_id, on_hand, sold_count, updated_at)
+        VALUES ($1,$2,$3,0, NOW())
         ON CONFLICT (shop_id, product_id) DO UPDATE 
         SET on_hand = COALESCE(stock.on_hand, 0) + EXCLUDED.on_hand, updated_at = NOW()
       `
-      await client.query(upsert, [shopId, productId, quantity, 0])
+      await client.query(upsert, [shopId, productId, quantity])
       
       // 3. Return updated stock
       const { rows } = await client.query(

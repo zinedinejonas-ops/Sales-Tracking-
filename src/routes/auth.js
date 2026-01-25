@@ -9,7 +9,7 @@ router.post('/login', async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) return res.status(400).json({ error: 'missing_fields' })
   try {
-    const { rows } = await query('SELECT id, name, email, password, role, active FROM users WHERE email=?', [email])
+    const { rows } = await query('SELECT id, name, email, password, role, active FROM users WHERE email=$1', [email])
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' })
     const user = rows[0]
     if (!user.active) return res.status(403).json({ error: 'inactive_user' })
