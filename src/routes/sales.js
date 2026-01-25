@@ -168,6 +168,32 @@ router.post('/sync', requireAuth, async (req, res) => {
         if (existing.rows.length) {
           return { status: 'duplicate', sale_id: existing.rows[0].id }
         }
+
+        // Aggregate items to prevent double-spending stock within the same sale
+        const aggregatedItems = {}
+        for (const raw of items) {
+          const pid = Number(raw.product_id)
+          const qty = Number(raw.quantity)
+          if (!pid || !qty || qty <= 0) {
+            throw Object.assign(new Error('invalid_item'), { code: 'INVALID_ITEM' })
+          }
+          if (!aggregatedItems[pid]) aggregatedItems[pid] = 0
+          aggregatedItems[pid] += qty
+        }
+
+        // Check stock for all items first
+        for (const [pidStr, totalQty] of Object.entries(aggregatedItems)) {
+          const pid = Number(pidStr)
+          const { rows: stockRows } = await client.query('SELECT on_hand FROM stock WHERE shop_id=$1 AND product_id=$2 FOR UPDATE', [shopId, pid])
+          if (!stockRows.length) {
+            throw Object.assign(new Error('stock_not_found'), { code: 'STOCK_NOT_FOUND', product_id: pid })
+          }
+          const onHand = Number(stockRows[0].on_hand)
+          if (onHand < totalQty) {
+            throw Object.assign(new Error('insufficient_stock'), { code: 'INSUFFICIENT_STOCK', product_id: pid, available: onHand, requested: totalQty })
+          }
+        }
+
         let subtotal = 0
         let taxTotal = 0
         let discountTotal = 0
@@ -176,17 +202,7 @@ router.post('/sync', requireAuth, async (req, res) => {
           const pid = Number(raw.product_id)
           const qty = Number(raw.quantity)
           const discountPrice = raw.discount_price != null ? Number(raw.discount_price) : null
-          if (!pid || !qty || qty <= 0) {
-            throw Object.assign(new Error('invalid_item'), { code: 'INVALID_ITEM' })
-          }
-          const { rows: stockRows } = await client.query('SELECT on_hand FROM stock WHERE shop_id=$1 AND product_id=$2 FOR UPDATE', [shopId, pid])
-          if (!stockRows.length) {
-            throw Object.assign(new Error('stock_not_found'), { code: 'STOCK_NOT_FOUND', product_id: pid })
-          }
-          const onHand = Number(stockRows[0].on_hand)
-          if (onHand < qty) {
-            throw Object.assign(new Error('insufficient_stock'), { code: 'INSUFFICIENT_STOCK', product_id: pid, available: onHand, requested: qty })
-          }
+          
           const { rows: pr } = await client.query('SELECT sell_price, cost_price, tax_rate FROM products WHERE id=$1 AND active=true', [pid])
           if (!pr.length) {
             throw Object.assign(new Error('product_not_found'), { code: 'PRODUCT_NOT_FOUND', product_id: pid })

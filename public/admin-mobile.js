@@ -130,7 +130,7 @@ function FloatingMenu({ show, onClose }) {
 }
 
 function Home() {
-  const { dailyPerShop, weeklyPerShop, weeklyTopProducts, weeklyTotals, monthlyTotals, profitDaily, profitWeekly, profitOverview, stockSummary, navigate, toggleMenu } = useContext(AppContext)
+  const { dailyPerShop, weeklyPerShop, weeklyTopProducts, weeklyTotals, monthlyTotals, profitDaily, profitWeekly, profitOverview, stockSummary, notifications, navigate, toggleMenu } = useContext(AppContext)
   const ov = profitOverview || { weekly_total_formatted: '0 TZS', monthly_total_formatted: '0 TZS', weekly_total: 0, monthly_total: 0 }
   
   return React.createElement('div', null,
@@ -139,6 +139,14 @@ function Home() {
       React.createElement('button', { className: 'icon-btn', onClick: toggleMenu }, '≡')
     ),
     React.createElement('div', { className: 'grid' },
+      notifications && notifications.length > 0 && React.createElement('div', { className: 'card widget-large', style: { border: '1px solid orange' } },
+        React.createElement('h3', { style: { color: 'orange' } }, '⚠️ Alerts'),
+        React.createElement('div', { className: 'list' },
+          notifications.map((n, i) => React.createElement('div', { className: 'list-item', key: i },
+            React.createElement('div', { style: { color: '#d32f2f', fontSize: 13 } }, n.message)
+          ))
+        )
+      ),
       React.createElement('div', { className: 'card widget-large', onClick: () => navigate('details-profit-daily') },
         React.createElement('h3', null, 'Total Daily Sales'),
         React.createElement('div', { className: 'list' },
@@ -442,7 +450,7 @@ function ProductsStockPage() {
     .sort((a, b) => sort === 'alpha' ? a.name.localeCompare(b.name) : 0)
 
   function open(p) {
-    const fullP = recentProducts.find(x => x.id === (p.product_id || p.id)) || p
+    const fullP = (Array.isArray(recentProducts) ? recentProducts.find(x => x.id === (p.product_id || p.id)) : null) || p
     setPopup({ show: true, product: fullP, current: fullP.total_stock || 0, addQty: '' })
   }
 
@@ -692,8 +700,8 @@ function CalculatePage() {
           React.createElement('select', { id: 'w2' }, weeks.map(w => React.createElement('option', { key: w, value: w }, new Date(w).toLocaleDateString())))
         ),
         React.createElement('button', { className: 'primary', style: { marginTop: 8 }, onClick: () => {
-           const a = weeklyTotals.find(x => String(x.period) === document.getElementById('w1').value)
-           const b = weeklyTotals.find(x => String(x.period) === document.getElementById('w2').value)
+           const a = Array.isArray(weeklyTotals) ? weeklyTotals.find(x => String(x.period) === document.getElementById('w1').value) : null
+           const b = Array.isArray(weeklyTotals) ? weeklyTotals.find(x => String(x.period) === document.getElementById('w2').value) : null
            setResult((Number(a?.grand_total)||0) + (Number(b?.grand_total)||0))
         } }, 'Calculate')
       ),
@@ -771,6 +779,16 @@ function SellerProductsPage() {
     const p = sellPopup.product
     const price = Number(sellPopup.price)
     if (!price || price <= 0) return
+
+    // Check stock availability
+    const offline = getLocal('offline_sales', []).filter(s => s.shop_id === myShopId && s.product_id === p.id && !s.synced)
+    const offlineSold = offline.reduce((a, b) => a + Number(b.quantity), 0)
+    const available = (Number(p.on_hand) || 0) - offlineSold
+    
+    if (available <= 0) {
+      alert('No product for sell')
+      return
+    }
 
     const sale = {
       id: uid(),
@@ -956,10 +974,23 @@ function SellerSellPage() {
     e.preventDefault()
     const v = Number(qty)
     if (!v || v <= 0 || !myShopId || !currentProduct) return
+
+    // Check stock availability
+    const offline = getLocal('offline_sales', []).filter(s => s.shop_id === myShopId && s.product_id === currentProduct.id && !s.synced)
+    const offlineSold = offline.reduce((a, b) => a + Number(b.quantity), 0)
+    const available = (Number(currentProduct.on_hand) || 0) - offlineSold
+    
+    if (available <= 0) {
+      alert('No product for sell')
+      return
+    }
+    if (v > available) {
+      alert('Insufficient stock. Available: ' + available)
+      return
+    }
+
     const sale = { id: uid(), shop_id: myShopId, product_id: currentProduct.id, quantity: v, discount_price: useDefault ? null : Number(price), synced: false, client_created_at: new Date().toISOString() }
-    const arr = getLocal('offline_sales', [])
-    arr.push(sale)
-    setLocal('offline_sales', arr)
+    
     if (navigator.onLine) {
       try {
         await api('/sales/sync', 'POST', token, { sales: [{
@@ -968,8 +999,18 @@ function SellerSellPage() {
           client_created_at: sale.client_created_at,
           items: [{ product_id: sale.product_id, quantity: sale.quantity, discount_price: sale.discount_price }]
         }] })
-      } catch {}
+        sale.synced = true
+      } catch (err) {
+        if (err.message === 'insufficient_stock' || err.message === 'stock_not_found') {
+          alert('No product for sell')
+          return
+        }
+      }
     }
+
+    const arr = getLocal('offline_sales', [])
+    arr.push(sale)
+    setLocal('offline_sales', arr)
     navigate('seller-products')
   }
   return React.createElement('div', null,
@@ -1044,7 +1085,7 @@ function ShopDetailsPage({ id }) {
       setLoading(true)
       // Get shop name
       const shops = await api('/shops', 'GET', token)
-      const s = shops.find(x => x.id === Number(id))
+      const s = Array.isArray(shops) ? shops.find(x => x.id === Number(id)) : null
       setShop(s)
 
       // Get all products and their stock in this shop
@@ -1190,6 +1231,7 @@ function App() {
   const [profitMonthly, setProfitMonthly] = useState([])
   const [profitOverview, setProfitOverview] = useState({ daily_per_shop: [], weekly_total: 0, monthly_total: 0, weekly_total_formatted: '0 TZS', monthly_total_formatted: '0 TZS' })
   const [stockSummary, setStockSummary] = useState([])
+  const [notifications, setNotifications] = useState([])
   const [sellers, setSellers] = useState([])
   const [ranking, setRanking] = useState([])
   const [shops, setShops] = useState([])
@@ -1275,13 +1317,18 @@ function App() {
 
   async function loadHomeData() {
     try {
-      const [d, w, wt, mt] = await Promise.all([
+      const [d, w, wt, mt, notifs] = await Promise.all([
         api('/reports/sales-per-shop?period=daily', 'GET', token),
         api('/reports/sales-per-shop?period=weekly', 'GET', token),
         api('/reports/sales?period=weekly', 'GET', token),
-        api('/reports/sales?period=monthly', 'GET', token)
+        api('/reports/sales?period=monthly', 'GET', token),
+        api('/notifications', 'GET', token)
       ])
-      setDailyPerShop(d); setWeeklyPerShop(w); setWeeklyTotals(wt); setMonthlyTotals(mt)
+      setDailyPerShop(Array.isArray(d) ? d : [])
+      setWeeklyPerShop(Array.isArray(w) ? w : [])
+      setWeeklyTotals(Array.isArray(wt) ? wt : [])
+      setMonthlyTotals(Array.isArray(mt) ? mt : [])
+      setNotifications(Array.isArray(notifs) ? notifs : [])
       const tp = await api('/reports/top-products?period=weekly' + (shopId ? '&shopId=' + shopId : ''), 'GET', token)
       setWeeklyTopProducts(tp)
     } catch(e) {}
@@ -1460,7 +1507,7 @@ function App() {
     shops, shopRanking, loadShops, loadShopRanking, sellersOptions,
     recentProducts, bestProducts, frequentProducts, loadRecentProducts,
     shopPopup, setShopPopup, shopDeleteOpen, setShopDeleteOpen,
-    api, shopId, setShopId, currentProduct, setCurrentProduct, stockSummary, toggleMenu: () => setMenuOpen(o => !o),
+    api, shopId, setShopId, currentProduct, setCurrentProduct, stockSummary, notifications, toggleMenu: () => setMenuOpen(o => !o),
     syncOffline
   }), [
     token, role, user, theme, lang, route,
@@ -1468,7 +1515,7 @@ function App() {
     sellers, ranking,
     shops, shopRanking, sellersOptions,
     recentProducts, bestProducts, frequentProducts,
-    shopPopup, shopDeleteOpen, shopId, currentProduct, stockSummary
+    shopPopup, shopDeleteOpen, shopId, currentProduct, stockSummary, notifications
   ])
 
   let content

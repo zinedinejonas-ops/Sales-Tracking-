@@ -158,4 +158,29 @@ router.get('/alerts/low-stock', requireAuth, requireRole('admin'), async (req, r
   }
 })
 
+router.get('/notifications', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    // Alert when stock is below 1/4 of initial stock
+    // Using multiplication to avoid float issues: current * 4 < initial
+    const { rows } = await query(
+      `SELECT id, name, total_stock, initial_stock
+       FROM products
+       WHERE active=true 
+         AND initial_stock > 0
+         AND (total_stock * 4) < initial_stock
+       ORDER BY name ASC`
+    )
+    const notifications = rows.map(p => ({
+      type: 'low_stock',
+      product_id: p.id,
+      message: \`Low Stock: \${p.name} (Current: \${p.total_stock}, Initial: \${p.initial_stock})\`,
+      level: 'warning'
+    }))
+    res.json(notifications)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'server_error' })
+  }
+})
+
 export default router
