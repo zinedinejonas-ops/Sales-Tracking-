@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS sales (
   grand_total DECIMAL(10, 2) DEFAULT 0.00,
   payment_status VARCHAR(50) DEFAULT 'paid',
   client_created_at TIMESTAMP,
+  synced_from_offline BOOLEAN DEFAULT FALSE,
+  synced_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (shop_id) REFERENCES shops(id),
   FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE SET NULL,
