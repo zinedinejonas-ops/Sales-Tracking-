@@ -143,7 +143,7 @@ function Home() {
         React.createElement('h3', null, 'Total Daily Sales'),
         React.createElement('div', { className: 'list' },
           dailyPerShop.map(s => {
-            const p = profitDaily.find(x => x.shop_id === s.shop_id)
+            const p = Array.isArray(profitDaily) ? profitDaily.find(x => x.shop_id === s.shop_id) : null
             return React.createElement('div', { className: 'list-item', key: s.shop_id },
               React.createElement('div', null, s.shop_name),
               React.createElement('div', { style: { fontWeight: 'bold' } }, currency(s.grand_total)),
@@ -156,7 +156,7 @@ function Home() {
         React.createElement('h3', null, 'Weekly Sales'),
         React.createElement('div', { className: 'list' },
           weeklyPerShop.slice(0, 3).map(s => {
-            const p = profitWeekly.find(x => x.shop_id === s.shop_id)
+            const p = Array.isArray(profitWeekly) ? profitWeekly.find(x => x.shop_id === s.shop_id) : null
             return React.createElement('div', { className: 'list-item', key: s.shop_id },
               React.createElement('div', { style: { fontSize: 13 } }, s.shop_name),
               React.createElement('div', { style: { fontSize: 13 } }, currency(s.grand_total)),
