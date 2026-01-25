@@ -120,4 +120,42 @@ router.get('/sellers/ranking', requireAuth, requireRole('admin'), async (req, re
   }
 })
 
+// New route for low stock alerts
+router.get('/alerts/low-stock', requireAuth, requireRole('admin'), async (req, res) => {
+  const shopId = req.query.shopId ? Number(req.query.shopId) : null
+  try {
+    const params = []
+    let whereShop = ''
+    if (shopId) {
+      params.push(shopId)
+      whereShop = ` AND st.shop_id = $${params.length}`
+    }
+    
+    // Logic: on_hand < (on_hand + sold_count) * 0.25
+    // To avoid division by zero if sold_count is 0, we can rewrite:
+    // on_hand < (on_hand + sold_count) / 4  => 4 * on_hand < on_hand + sold_count => 3 * on_hand < sold_count
+    // But what if sold_count is 0? Then 3 * on_hand < 0 -> on_hand < 0. That covers negative stock.
+    // If on_hand is 100, sold is 0. 300 < 0? False.
+    // If on_hand is 1, sold is 100. 3 < 100? True. (Stock 1, Initial 101. 1 < 25.25. Yes).
+    // The requirement: "below 1/4 of its initial stock amount".
+    // Initial Stock = on_hand + sold_count.
+    // Alert if on_hand < (on_hand + sold_count) / 4.
+    
+    const { rows } = await query(
+      `SELECT st.shop_id, sh.name AS shop_name, st.product_id, p.name AS product_name, st.on_hand, st.sold_count,
+              (st.on_hand + st.sold_count) AS initial_stock
+       FROM stock st
+       JOIN products p ON p.id = st.product_id
+       JOIN shops sh ON sh.id = st.shop_id
+       WHERE st.on_hand < (st.on_hand + st.sold_count) * 0.25 ${whereShop}
+       ORDER BY st.shop_id, p.name`,
+      params
+    )
+    res.json(rows)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'server_error' })
+  }
+})
+
 export default router

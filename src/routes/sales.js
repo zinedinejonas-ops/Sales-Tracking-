@@ -23,16 +23,24 @@ router.post('/shops/:shopId', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'forbidden_shop' })
   }
 
+  // Aggregate quantities by product_id to prevent duplicate item bypass
+  const aggregatedItems = {}
+  for (const item of items) {
+    const pid = Number(item.product_id)
+    const qty = Number(item.quantity)
+    if (!pid || !qty || qty <= 0) {
+      return res.status(422).json({ error: 'invalid_item' })
+    }
+    if (!aggregatedItems[pid]) aggregatedItems[pid] = 0
+    aggregatedItems[pid] += qty
+  }
+
   try {
     const result = await transaction(async (client) => {
       // First, lock and verify stock availability for each item.
-      for (const item of items) {
-        const pid = Number(item.product_id)
-        const qty = Number(item.quantity)
-        if (!pid || !qty || qty <= 0) {
-          throw Object.assign(new Error('invalid_item'), { code: 'INVALID_ITEM' })
-        }
-
+      for (const [pidStr, totalQty] of Object.entries(aggregatedItems)) {
+        const pid = Number(pidStr)
+        
         // Lock the stock row to prevent race conditions during concurrent sales.
         const { rows: stockRows } = await client.query(
           'SELECT on_hand FROM stock WHERE shop_id=$1 AND product_id=$2 FOR UPDATE',
@@ -42,8 +50,8 @@ router.post('/shops/:shopId', requireAuth, async (req, res) => {
           throw Object.assign(new Error('stock_not_found'), { code: 'STOCK_NOT_FOUND', product_id: pid })
         }
         const onHand = Number(stockRows[0].on_hand)
-        if (onHand < qty) {
-          throw Object.assign(new Error('insufficient_stock'), { code: 'INSUFFICIENT_STOCK', product_id: pid, available: onHand, requested: qty })
+        if (onHand < totalQty) {
+          throw Object.assign(new Error('insufficient_stock'), { code: 'INSUFFICIENT_STOCK', product_id: pid, available: onHand, requested: totalQty })
         }
       }
 

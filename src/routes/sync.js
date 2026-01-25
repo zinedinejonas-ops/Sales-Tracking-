@@ -37,6 +37,35 @@ router.post('/offline-sales', requireAuth, async (req, res) => {
         if (existing.rows.length) {
           return { status: 'duplicate', sale_id: existing.rows[0].id }
         }
+
+        // Aggregate quantities by product_id to prevent duplicate item bypass
+        const aggregatedItems = {}
+        for (const item of items) {
+          const pid = Number(item.product_id)
+          const qty = Number(item.quantity)
+          if (!pid || !qty || qty <= 0) {
+            throw Object.assign(new Error('invalid_item'), { code: 'INVALID_ITEM' })
+          }
+          if (!aggregatedItems[pid]) aggregatedItems[pid] = 0
+          aggregatedItems[pid] += qty
+        }
+
+        // Verify stock availability with aggregated quantities
+        for (const [pidStr, totalQty] of Object.entries(aggregatedItems)) {
+          const pid = Number(pidStr)
+          const stock = await client.query(
+            'SELECT on_hand FROM stock WHERE shop_id=$1 AND product_id=$2 FOR UPDATE',
+            [shopId, pid]
+          )
+          if (!stock.rows.length) {
+            throw Object.assign(new Error('stock_not_found'), { code: 'STOCK_NOT_FOUND', product_id: pid })
+          }
+          const onHand = Number(stock.rows[0].on_hand)
+          if (onHand < totalQty) {
+            throw Object.assign(new Error('insufficient_stock'), { code: 'INSUFFICIENT_STOCK', product_id: pid, available: onHand, requested: totalQty })
+          }
+        }
+
         let subtotal = 0
         let taxTotal = 0
         let discountTotal = 0
@@ -47,14 +76,7 @@ router.post('/offline-sales', requireAuth, async (req, res) => {
           if (!pid || !qty || qty <= 0) {
             throw Object.assign(new Error('invalid_item'), { code: 'INVALID_ITEM' })
           }
-          const stock = await client.query('SELECT on_hand FROM stock WHERE shop_id=$1 AND product_id=$2 FOR UPDATE', [shopId, pid])
-          if (!stock.rows.length) {
-            throw Object.assign(new Error('stock_not_found'), { code: 'STOCK_NOT_FOUND', product_id: pid })
-          }
-          const onHand = Number(stock.rows[0].on_hand)
-          if (onHand < qty) {
-            throw Object.assign(new Error('insufficient_stock'), { code: 'INSUFFICIENT_STOCK', product_id: pid, available: onHand, requested: qty })
-          }
+          
           const pr = await client.query('SELECT sell_price, tax_rate FROM products WHERE id=$1 AND active=true', [pid])
           if (!pr.rows.length) {
             throw Object.assign(new Error('product_not_found'), { code: 'PRODUCT_NOT_FOUND', product_id: pid })
