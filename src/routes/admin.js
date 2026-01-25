@@ -173,7 +173,7 @@ router.get('/notifications', requireAuth, requireRole('admin'), async (req, res)
     const notifications = rows.map(p => ({
       type: 'low_stock',
       product_id: p.id,
-      message: \`Low Stock: \${p.name} (Current: \${p.total_stock}, Initial: \${p.initial_stock})\`,
+      message: `Low Stock: ${p.name} (Current: ${p.total_stock}, Initial: ${p.initial_stock})`,
       level: 'warning'
     }))
     res.json(notifications)
