@@ -1,4 +1,5 @@
 import express from 'express'
+import cors from 'cors'
 import dotenv from 'dotenv'
 import authRouter from './routes/auth.js'
 import productsRouter from './routes/products.js'
@@ -15,6 +16,7 @@ import { query } from './db.js'
 dotenv.config()
 
 const app = express()
+app.use(cors())
 app.use(express.json())
 app.get('/', (req, res) => {
   res.redirect('/admin-mobile.html#login')

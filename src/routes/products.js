@@ -85,8 +85,8 @@ router.post('/register', requireAuth, requireRole('admin'), async (req, res) => 
   try {
     const sku = ('SKU-' + name).replace(/\s+/g, '-').toUpperCase().slice(0, 32)
     await query(
-      `INSERT INTO products (sku, name, unit, cost_price, sell_price, tax_rate, active, created_at, total_stock)
-       VALUES ($1,$2,$3,$4,$5,0,true, NOW(), $6)`,
+      `INSERT INTO products (sku, name, unit, cost_price, sell_price, tax_rate, active, created_at, total_stock, initial_stock)
+       VALUES ($1,$2,$3,$4,$5,0,true, NOW(), $6, $6)`,
       [sku, name, unit, Number(cost_price), Number(finalSell), stock]
     )
     const { rows } = await query(

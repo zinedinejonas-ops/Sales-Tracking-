@@ -729,12 +729,83 @@ function DetailsPage({ title, data, mapFn }) {
   )
 }
 
+function SellerNav() {
+  const { route, navigate } = useContext(AppContext)
+  const Item = (key, icon, label) => React.createElement('a', {
+    href: '#',
+    className: 'nav-item ' + (route === key ? 'active' : ''),
+    onClick: e => { e.preventDefault(); navigate(key) }
+  },
+    React.createElement('div', { className: 'nav-icon' }, icon),
+    React.createElement('div', null, label)
+  )
+  return React.createElement('div', { className: 'bottomnav' },
+    Item('seller-products', '⌂', 'Home'),
+    Item('seller-sales', '📋', 'Sales')
+  )
+}
+
+function SellerSalesPage() {
+  const { lang, navigate, syncOffline, sellerProducts, loadSellerProducts } = useContext(AppContext)
+  const [sales, setSales] = useState([])
+
+  useEffect(() => {
+    load()
+    loadSellerProducts() 
+    window.addEventListener('storage', load)
+    return () => window.removeEventListener('storage', load)
+  }, [])
+
+  function load() {
+    const s = getLocal('offline_sales', [])
+    setSales([...s].reverse()) 
+  }
+
+  function dropSale(sale) {
+    if (sale.synced) {
+        alert('Cannot delete synced sale')
+        return
+    }
+    if (!confirm('Delete this unsynced sale?')) return
+    
+    const current = getLocal('offline_sales', [])
+    const updated = current.filter(s => (s.id || s.client_id) !== (sale.id || sale.client_id))
+    setLocal('offline_sales', updated)
+    load()
+  }
+
+  return React.createElement('div', null,
+    React.createElement('div', { className: 'topbar' },
+        React.createElement('h3', { style: { margin: 0 } }, 'My Sales'),
+        React.createElement('div', { className: 'row' },
+            React.createElement('button', { className: 'icon-btn', onClick: syncOffline }, '↻')
+        )
+    ),
+    React.createElement('div', { className: 'list', style: { padding: 16, paddingBottom: 80 } },
+        sales.length === 0 && React.createElement('div', { style: { textAlign: 'center', padding: 20, color: 'gray' } }, 'No sales recorded locally'),
+        sales.map(s => {
+            const p = Array.isArray(sellerProducts) ? sellerProducts.find(x => x.id === s.product_id) : null
+            return React.createElement('div', { className: 'card list-item', key: s.id || s.client_id },
+            React.createElement('div', null, 
+                React.createElement('div', { style: { fontWeight: 'bold' } }, p ? p.name : 'Product #' + s.product_id),
+                React.createElement('div', { style: { fontSize: 12 } }, 'Qty: ' + s.quantity + ' | ' + (s.synced ? 'Synced ✅' : 'Unsynced ⏳')),
+                React.createElement('div', { style: { fontSize: 11, color: 'gray' } }, new Date(s.client_created_at).toLocaleString())
+            ),
+            !s.synced && React.createElement('button', { 
+                style: { background: '#ef4444', color: 'white', border: 'none', padding: '4px 8px', borderRadius: 4 },
+                onClick: () => dropSale(s)
+            }, 'Drop')
+        )})
+    )
+  )
+}
+
 function SellerProductsPage() {
   const { api, token, navigate, lang, setToken, setRole, setUser, setShopId, user, shopId, syncOffline } = useContext(AppContext)
   const [search, setSearch] = useState('')
   const [list, setList] = useState([])
   const [detailsPopup, setDetailsPopup] = useState({ show: false, product: null, info: null })
-  const [sellPopup, setSellPopup] = useState({ show: false, product: null, price: '', useAdminPrice: true })
+  const [sellPopup, setSellPopup] = useState({ show: false, product: null, price: '', useAdminPrice: true, qty: '1' })
   
   const myShopId = Number(shopId || user?.shop_id || 0)
 
@@ -771,14 +842,15 @@ function SellerProductsPage() {
   }
 
   function openSell(p) {
-    setSellPopup({ show: true, product: p, price: p.sell_price, useAdminPrice: true })
+    setSellPopup({ show: true, product: p, price: p.sell_price, useAdminPrice: true, qty: '1' })
   }
 
   async function saveSale(e) {
     e.preventDefault()
     const p = sellPopup.product
     const price = Number(sellPopup.price)
-    if (!price || price <= 0) return
+    const q = Number(sellPopup.qty)
+    if (!price || price <= 0 || !q || q <= 0) return
 
     // Check stock availability
     const offline = getLocal('offline_sales', []).filter(s => s.shop_id === myShopId && s.product_id === p.id && !s.synced)
@@ -789,12 +861,17 @@ function SellerProductsPage() {
       alert('No product for sell')
       return
     }
+    if (q > available) {
+      alert('Insufficient stock. Available: ' + available)
+      return
+    }
 
     const sale = {
       id: uid(),
       shop_id: myShopId,
       product_id: p.id,
-      quantity: 1,
+      product_name: p.name,
+      quantity: q,
       discount_price: price,
       client_created_at: new Date().toISOString(),
       synced: false
@@ -803,7 +880,7 @@ function SellerProductsPage() {
     const currentSales = getLocal('offline_sales', [])
     setLocal('offline_sales', [...currentSales, sale])
     
-    setSellPopup({ show: false, product: null, price: '', useAdminPrice: true })
+    setSellPopup({ show: false, product: null, price: '', useAdminPrice: true, qty: '1' })
     alert('Sale recorded!')
     
     if (navigator.onLine) {
@@ -868,13 +945,18 @@ function SellerProductsPage() {
             )
           ),
           !sellPopup.useAdminPrice && React.createElement('input', { type: 'number', placeholder: 'Enter Custom Price', value: sellPopup.price, onChange: e => setSellPopup({ ...sellPopup, price: e.target.value }) }),
+          React.createElement('div', { className: 'list-item' },
+             React.createElement('span', null, 'Quantity'),
+             React.createElement('input', { type: 'number', value: sellPopup.qty, onChange: e => setSellPopup({ ...sellPopup, qty: e.target.value }), style: { width: 80, textAlign: 'center' } })
+          ),
           React.createElement('div', { className: 'row' },
             React.createElement('button', { type: 'submit', className: 'primary' }, 'Confirm Sale'),
             React.createElement('button', { type: 'button', onClick: () => setSellPopup({ show: false, product: null, price: '', useAdminPrice: true }) }, 'Cancel')
           )
         )
       )
-    )
+    ),
+    React.createElement(SellerNav)
   )
 }
 
@@ -967,29 +1049,30 @@ function SellerSellPage() {
   const [qty, setQty] = useState('')
   const [useDefault, setUseDefault] = useState(true)
   const [price, setPrice] = useState(() => currentProduct ? Number(currentProduct.sell_price || 0) : 0)
+  
+  const offline = getLocal('offline_sales', []).filter(s => s.shop_id === myShopId && s.product_id === currentProduct?.id && !s.synced)
+  const offlineSold = offline.reduce((a, b) => a + Number(b.quantity), 0)
+  const available = (Number(currentProduct?.on_hand) || 0) - offlineSold
+  const noStock = available <= 0
+
   useEffect(() => {
     if (currentProduct) setPrice(Number(currentProduct.sell_price || 0))
   }, [currentProduct])
   const save = async (e) => {
     e.preventDefault()
-    const v = Number(qty)
-    if (!v || v <= 0 || !myShopId || !currentProduct) return
-
-    // Check stock availability
-    const offline = getLocal('offline_sales', []).filter(s => s.shop_id === myShopId && s.product_id === currentProduct.id && !s.synced)
-    const offlineSold = offline.reduce((a, b) => a + Number(b.quantity), 0)
-    const available = (Number(currentProduct.on_hand) || 0) - offlineSold
-    
-    if (available <= 0) {
+    if (noStock) {
       alert('No product for sell')
       return
     }
+    const v = Number(qty)
+    if (!v || v <= 0 || !myShopId || !currentProduct) return
+
     if (v > available) {
       alert('Insufficient stock. Available: ' + available)
       return
     }
 
-    const sale = { id: uid(), shop_id: myShopId, product_id: currentProduct.id, quantity: v, discount_price: useDefault ? null : Number(price), synced: false, client_created_at: new Date().toISOString() }
+    const sale = { id: uid(), shop_id: myShopId, product_id: currentProduct.id, product_name: currentProduct.name, quantity: v, discount_price: useDefault ? null : Number(price), synced: false, client_created_at: new Date().toISOString() }
     
     if (navigator.onLine) {
       try {
@@ -1021,10 +1104,13 @@ function SellerSellPage() {
       )
     ),
     currentProduct && React.createElement('div', { style: { padding: 16 } },
+      noStock && React.createElement('div', { style: { padding: 12, background: '#ffebee', color: '#c62828', borderRadius: 8, marginBottom: 12, textAlign: 'center' } }, 
+        lang === 'sw' ? 'Hakuna bidhaa ya kuuza' : 'No product for sell'
+      ),
       React.createElement('div', { className: 'card' },
         React.createElement('div', { className: 'list-item' }, React.createElement('span', null, currentProduct.name), React.createElement('span', { style: { fontWeight: 'bold' } }, currency(currentProduct.sell_price))
       )),
-      React.createElement('div', { className: 'card' },
+      React.createElement('div', { className: 'card', style: { opacity: noStock ? 0.5 : 1, pointerEvents: noStock ? 'none' : 'auto' } },
         React.createElement('div', { className: 'list-item' },
           React.createElement('span', null, lang === 'sw' ? 'Bei ya kawaida' : 'Default price'),
           React.createElement('input', { type: 'checkbox', checked: useDefault, onChange: e => setUseDefault(e.target.checked) })
@@ -1037,9 +1123,85 @@ function SellerSellPage() {
           React.createElement('span', null, lang === 'sw' ? 'Kiasi' : 'Quantity'),
           React.createElement('input', { type: 'number', value: qty, onChange: e => setQty(e.target.value) })
         ),
-        React.createElement('button', { className: 'primary', onClick: save }, lang === 'sw' ? 'Uza' : 'Save')
+        React.createElement('button', { className: 'primary', onClick: save, disabled: noStock }, lang === 'sw' ? 'Uza' : 'Save')
       )
     )
+  )
+}
+
+function SellerNav() {
+  const { route, navigate } = useContext(AppContext)
+  const Item = (key, icon, label) => React.createElement('a', {
+    href: '#',
+    className: 'nav-item ' + (route === key ? 'active' : ''),
+    onClick: e => { e.preventDefault(); navigate(key) }
+  },
+    React.createElement('div', { className: 'nav-icon' }, icon),
+    React.createElement('div', null, label)
+  )
+  return React.createElement('div', { className: 'bottomnav' },
+    Item('seller-products', '⌂', 'Home'),
+    Item('seller-sales', '📋', 'Sales')
+  )
+}
+
+function SellerSalesPage() {
+  const { navigate, lang } = useContext(AppContext)
+  const [sales, setSales] = useState([])
+  const [dropModal, setDropModal] = useState({ show: false, sale: null })
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  function load() {
+    const all = getLocal('offline_sales', [])
+    setSales(all.slice(-10).reverse())
+  }
+
+  function confirmDrop() {
+    if (!dropModal.sale) return
+    const s = dropModal.sale
+    if (s.synced) {
+        alert('Cannot delete synced sale')
+        return
+    }
+    
+    const all = getLocal('offline_sales', [])
+    const updated = all.filter(x => (x.id || x.client_id) !== (s.id || s.client_id))
+    setLocal('offline_sales', updated)
+    setDropModal({ show: false, sale: null })
+    load()
+  }
+
+  return React.createElement('div', null,
+    React.createElement('div', { className: 'topbar' },
+      React.createElement('h3', { style: { margin: 0 } }, 'My Sales (Last 10)')
+    ),
+    React.createElement('div', { className: 'list', style: { padding: '16px 16px 80px 16px' } },
+      sales.length === 0 && React.createElement('div', { style: { textAlign: 'center', padding: 20 } }, 'No sales recorded'),
+      sales.map(s => React.createElement('div', { className: 'card list-item', key: s.id || s.client_id },
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontWeight: 'bold' } }, s.product_name || 'Product ' + s.product_id),
+          React.createElement('div', { style: { fontSize: 12 } }, 'Qty: ' + s.quantity + ' | ' + (s.synced ? 'Synced ✅' : 'Unsynced ⏳'))
+        ),
+        !s.synced && React.createElement('button', { 
+            style: { background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '4px 8px' },
+            onClick: () => setDropModal({ show: true, sale: s })
+        }, 'Drop')
+      ))
+    ),
+    dropModal.show && React.createElement('div', { className: 'modal-overlay' },
+      React.createElement('div', { className: 'modal-card' },
+        React.createElement('h3', null, 'Drop Sale?'),
+        React.createElement('p', null, 'Are you sure you want to delete this unsynced sale?'),
+        React.createElement('div', { className: 'row' },
+            React.createElement('button', { className: 'primary', style: { background: '#ef4444' }, onClick: confirmDrop }, 'Yes, Drop'),
+            React.createElement('button', { onClick: () => setDropModal({ show: false, sale: null }) }, 'Cancel')
+        )
+      )
+    ),
+    React.createElement(SellerNav)
   )
 }
 
@@ -1560,6 +1722,7 @@ function App() {
       case 'help': content = React.createElement(HelpPage); break;
       case 'seller-actions': content = React.createElement(SellerActionsPage); break;
       case 'seller-products': content = React.createElement(SellerProductsPage); break;
+      case 'seller-sales': content = React.createElement(SellerSalesPage); break;
       case 'seller-settings': content = React.createElement(SellerSettingsPage); break;
       case 'seller-amount': content = React.createElement(SellerAmountPage); break;
       case 'seller-sell': content = React.createElement(SellerSellPage); break;
