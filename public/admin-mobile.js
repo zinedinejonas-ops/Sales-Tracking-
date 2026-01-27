@@ -1156,7 +1156,9 @@ function SellerSalesPage() {
 
   function load() {
     const all = getLocal('offline_sales', [])
-    setSales(all.slice(-10).reverse())
+    // Show only unsynced sales as per safe sync rules (pending action queue)
+    const pending = all.filter(s => !s.synced)
+    setSales(pending.slice(-10).reverse())
   }
 
   function confirmDrop() {
@@ -1176,17 +1178,18 @@ function SellerSalesPage() {
 
   return React.createElement('div', null,
     React.createElement('div', { className: 'topbar' },
-      React.createElement('h3', { style: { margin: 0 } }, 'My Sales (Last 10)')
+      React.createElement('h3', { style: { margin: 0 } }, 'Pending Sales (Unsynced)')
     ),
     React.createElement('div', { className: 'list', style: { padding: '16px 16px 80px 16px' } },
-      sales.length === 0 && React.createElement('div', { style: { textAlign: 'center', padding: 20 } }, 'No sales recorded'),
-      sales.map(s => React.createElement('div', { className: 'card list-item', key: s.id || s.client_id },
+      sales.length === 0 && React.createElement('div', { style: { textAlign: 'center', padding: 20, color: 'var(--muted)' } }, 'All sales synced ✅'),
+      sales.map(s => React.createElement('div', { className: 'card list-item', key: s.id || s.client_id, style: { borderLeft: s.sync_error ? '4px solid #ef4444' : '4px solid orange' } },
         React.createElement('div', null,
           React.createElement('div', { style: { fontWeight: 'bold' } }, s.product_name || 'Product ' + s.product_id),
-          React.createElement('div', { style: { fontSize: 12 } }, 'Qty: ' + s.quantity + ' | ' + (s.synced ? 'Synced ✅' : 'Unsynced ⏳'))
+          React.createElement('div', { style: { fontSize: 12 } }, 'Qty: ' + s.quantity + ' | ' + currency(s.discount_price || 0)),
+          s.sync_error && React.createElement('div', { style: { color: '#ef4444', fontSize: 11, fontWeight: 'bold' } }, 'Error: ' + s.sync_error)
         ),
-        !s.synced && React.createElement('button', { 
-            style: { background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '4px 8px' },
+        React.createElement('button', { 
+            style: { background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '6px 12px' },
             onClick: () => setDropModal({ show: true, sale: s })
         }, 'Drop')
       ))
