@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import os from 'os'
 import authRouter from './routes/auth.js'
 import productsRouter from './routes/products.js'
 import stockRouter from './routes/stock.js'
@@ -44,8 +45,20 @@ app.get('/health', (req, res) => {
 })
 
 const port = process.env.PORT || 3000
-app.listen(port,"0.0.0.0", async () => {
+app.listen(port, "0.0.0.0", async () => {
   console.log(`Server listening on port ${port}`)
+  
+  // Log all network interfaces to help with mobile access
+  const interfaces = os.networkInterfaces();
+  console.log('Available on your network at:');
+  Object.keys(interfaces).forEach((ifname) => {
+    interfaces[ifname].forEach((iface) => {
+      if ('IPv4' === iface.family && !iface.internal) {
+        console.log(`  http://${iface.address}:${port}`);
+      }
+    });
+  });
+
   try {
     await query('SELECT 1')
     console.log('Database connection successful')

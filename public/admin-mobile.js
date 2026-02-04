@@ -6,9 +6,12 @@ if (typeof React === 'undefined') {
 
 const { useState, useEffect, useContext, createContext, useMemo } = React
 
+const API_BASE = (window.CONFIG && window.CONFIG.API_BASE_URL) || ''
+
 // --- Helpers ---
 function api(path, method, token, body) {
-  return fetch(path, {
+  const url = path.startsWith('http') ? path : API_BASE + path
+  return fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json', Authorization: token ? 'Bearer ' + token : '' },
     body: body ? JSON.stringify(body) : undefined
@@ -1578,7 +1581,7 @@ function App() {
     e.preventDefault()
     setLoginError('')
     try {
-      const res = await fetch('/auth/login', {
+      const res = await fetch(API_BASE + '/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm)
@@ -1602,7 +1605,7 @@ function App() {
         setLoginError('Enter name and 4-digit passkey')
         return
       }
-      const res = await fetch('/auth/seller-login', {
+      const res = await fetch(API_BASE + '/auth/seller-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: sellerForm.name.trim(), passkey: sellerForm.passkey })
